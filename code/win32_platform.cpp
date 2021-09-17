@@ -1,174 +1,230 @@
-//(1) Day2: Opening a Win32 Window
+// Day3: Allocating A Back Buffer
+/*
+IMPORTANT NOTE: For (Day 3) watch the stream. It will help more than the code.
+*/
 
 #include <Windows.h>
 
-//WindowProc for WindowClass
-LRESULT CALLBACK MainWindowCallback(HWND Window,
-				    UINT Message,
-				    WPARAM WParam,
-				    LPARAM LParam)
+#define global_variable	static 
+#define local_persist	static
+#define internal		static// :--> @casey"One more meaning of *"static", What is does is basically, it can define a function as being local to the file that its in. So, it can be basically be used to say don't allow this function to be called from any other file other then the one that it is in. And by file I actually mean *"Translation Units" " global_variable bool Running; // NOTE: "static bool Running;" line is === to "bool Running = 0 or false;" 
+
+//@casey -> "For now this is a global. They will not last long. We will make them local soon. Its just for testing purpose."
+global_variable bool 		Running; //The following line is === to "bool Running = 0 or false;"
+global_variable BITMAPINFO 	BitmapInfo;
+global_variable void 		*BitmapMemory; //void *BitmapMemory; //@casey-> "BIG MOMENT: This is the actual bitmap memory that we are going receive back from Windows that we can finally draw into with our own renderer."
+global_variable HBITMAP 	BitmapHandle;
+global_variable HDC 		BitmapDeviceContext;
+
+
+// @casey -> "DIB --> Device Independent Bitmap. That is the name that Windows uses to talk about things that we can write into as Bitmaps that it can then display using gdi."
+internal void Win32_ResizeDIBSection(int Width, int Height) 
 {
-	LRESULT Result = 0; 
-	
-	// @casey "For now we are going not handle the messages. We're just gonna see when functions are called."
+	//@casey -> "We will basically have to build the buffer using Windows to give us a buffer that we can draw into." "This is the part where we actually create the *BACK-BUFFER*, to put it to the window."
+
+	//@casey (TODO): Bulletproof this :-> 
+	//@casey -> Maybe don't free first, then free after, then free if that fails.
+
+	//@casey (TODO): Free our DIBSection :->
+	if (BitmapHandle) //i.e @casey-> "If we already have our BitmapHandle initialzed then delete/free "
+	{
+		DeleteObject(BitmapHandle);
+	}
+	if (!BitmapDeviceContext) //i.e @casey-> "If we don't have a BitmapDeviceContext"
+	{
+		//@casey (TODO): Should we recreate these under certain special conditions.
+		BitmapDeviceContext = CreateCompatibleDC(0);
+	}
+
+	BitmapInfo.bmiHeader.biSize 		= sizeof(BitmapInfo.bmiHeader);
+	BitmapInfo.bmiHeader.biWidth 		= Width;
+	BitmapInfo.bmiHeader.biHeight 		= Height;
+	BitmapInfo.bmiHeader.biPlanes 		= 1;
+	BitmapInfo.bmiHeader.biBitCount 	= 32;
+	BitmapInfo.bmiHeader.biCompression 	= BI_RGB;
+
+	BitmapHandle =  CreateDIBSection(BitmapDeviceContext, //HDC hdc, 
+									 &BitmapInfo,		  //const BITMAPINFO *pbmi, 
+									 DIB_RGB_COLORS,	  //UINT usage, 
+									 &BitmapMemory,		  //void **ppvBits, 
+									 NULL,				  //HANDLE hSection, 
+									 NULL);				  //DWORD offset)
+
+}
+
+internal void Win32_UpdateWindow(HDC DeviceContext, 
+								 int X, 
+								 int Y, 
+								 int Width, 
+								 int Height)
+{
+	//@casey -> "What this function basically does it takes our DIBSection that we created and blits it , but it also allows us to scale it."
+	//"All this function does -> It is a rectangle to a reactangle copy, i.e Copies one reactangle to the other."
+	StretchDIBits(DeviceContext,
+				  X, Y, Width, Height,
+				  X, Y, Width, Height,
+				  BitmapMemory,
+				  &BitmapInfo,
+				  DIB_RGB_COLORS, 
+				  SRCCOPY);
+}
+
+LRESULT CALLBACK Win32_MainWindowCallback(HWND   Window,
+										  UINT 	Message,
+										  WPARAM WParam,
+										  LPARAM LParam)
+{
+	LRESULT Result = 0;
+
 	switch(Message)
 	{
 		case WM_ACTIVATEAPP: 
-		{
-			OutputDebugStringA("WM_ACTIVATEAPP\n");
-			
-		} break;
-
-		case WM_CLOSE:
-		{
-			OutputDebugStringA("WM_CLOSE\n");
-
-		} break;
-
-		case WM_DESTROY:
-		{
-			OutputDebugStringA("WM_DESTROY\n");
-
-		} break;
+				{
+					OutputDebugStringA("WM_ACTIVATEAPP\n");
+					
+				} break;
 
 		case WM_SIZE:
-		{
-			OutputDebugStringA("WM_SIZEX\n");
+				{
+					RECT ClientRect;
+					GetClientRect(Window, &ClientRect); //Docs: [Retrieves the coordinates of a window's client area. The client coordinates specify the upper-left and lower-right corners of the client area. Because client coordinates are relative to the upper-left corner of a window's client area, the coordinates of the upper-left corner are (0,0).] The "left" and "top" members are 0.The right and bottom members contain the width and height of the window.). "IN MY OPINION, to be honest there is no need to specify ClientRect.left and ClientRect.top in Width and Height."
+					int Width  = ClientRect.right - ClientRect.left; 
+					int Height = ClientRect.bottom - ClientRect.top;
 
-		} break;
+					Win32_ResizeDIBSection(Width, Height);
 
+					OutputDebugStringA("WM_SIZEX\n");
+
+				} break;
+
+
+		//@casey -> "WM_PAINT is one of the place where we will paint. But its not just the only region where we will paint."
 		case WM_PAINT:
-		{
-			PAINTSTRUCT Paint;
-			HDC DeviceContext = BeginPaint(Window, &Paint);
+			{
+				PAINTSTRUCT Paint;
+				HDC DeviceContext = BeginPaint(Window, &Paint);
 
-			int X = Paint.rcPaint.left;
-			int Y = Paint.rcPaint.top;
-			int Width = Paint.rcPaint.right - Paint.rcPaint.left;
-			int Height = Paint.rcPaint.bottom - Paint.rcPaint.top;
+				int X 		= Paint.rcPaint.left;
+				int Y 		= Paint.rcPaint.top;
+				int Width 	= Paint.rcPaint.right - Paint.rcPaint.left;
+				int Height 	= Paint.rcPaint.bottom - Paint.rcPaint.top;
 
-			//NOTE: For PatBlt function we imported "gdi32.lib" in our build.bat 
+				Win32_UpdateWindow(DeviceContext, 
+								   X, 
+								   Y, 
+								   Width, 
+								   Height);
 
+				EndPaint(Window, &Paint);
+				
+			} break;
 
-			//###0) On not using PatBlt Function, we will get a broken sort of "black-white screen" on resizing.
+		case WM_CLOSE:
+			{
+				// ##1
+				//PostQuitMessage(0);
+				
+				// ##2 : Better then ##1
+				//PostQuitMessage(0);
+				
+				// ##3
+				//DestroyWindow(Window); //"It just destroyes the Window, not closes the application.Therefore we used PostQuitMessage(0) inside WM_DESTROY"
 
+				// ##4 (@casey "Recommanded in HMH)
+				// @casey: TODO: "Handle this with a message to the user?"
+				Running = false;
 
-			//###1) Will get a white screen
-			
-			PatBlt(DeviceContext,//HDC hdc 
-			       X, 	     //int x, 
-			       Y, 	     //int y, 
-			       Width, 	     //int w, 
-			       Height, 	     //int h, 
-			       WHITENESS);   //DWORD rop
-			
+				OutputDebugStringA("WM_CLOSE\n");
 
+			} break;
 
-			//###2) Will get black-white flicker screen
-			
+		case WM_DESTROY:
+			{
+				// ##1
+				// //Nothing is written.
+				
+				// ##2 (Better then ##1 & connected to the #2 of WM_CLOSE)
+				//PostQuitMessage(0);
+				
+				// ##3 (connected to the #3 of WM_CLOSE)
+				//PostQuitMessage(0);
 
-			/*static DWORD Operation = WHITENESS;
-			PatBlt(DeviceContext, X, Y, Width, Height, Operation);
-			if (Operation == WHITENESS)
-				Operation = BLACKNESS;
-			else 
-				Operation = WHITENESS;
-			*/
+				// ##4 (@casey "Recommanded in HMH)
+				// @casey: TODO: "Handle this as an error - recreate window?"
+				Running = false;
 
-			EndPaint(Window, &Paint);
-			
-		} break;
+				OutputDebugStringA("WM_DESTROY\n");
+
+			} break;
 
 		default:
-		{
-			//OutputDebugStringA("Default\n");
-			Result = DefWindowProcA(Window, Message, WParam, LParam);
-		} 
+			{
+				//OutputDebugStringA("Default\n");
+				Result = DefWindowProcA(Window, Message, WParam, LParam);
+			} 
 	}
 
 	return (Result);
 }
 
-//Entry-Point
+//Win32 Entry Point
 int CALLBACK WinMain(HINSTANCE Instance, 
-		     HINSTANCE PrevInstance, 
-		     LPSTR CmdLine, 
-		     int ShowCmd)
+					 HINSTANCE PrevInstance, 
+					 LPSTR CmdLine, 
+					 int ShowCmd)
 {
-	WNDCLASS WindowClass = {};
-	WindowClass.hInstance = Instance;
-	WindowClass.lpfnWndProc = MainWindowCallback; //(WindowProc)This programmerDefined Funtion: "Handles all the messages coming from windows"
-	WindowClass.lpszClassName = "HandmadeHeroWindowClass";
-	//WindowClass.icon;
-	WindowClass.style = (CS_HREDRAW | CS_VREDRAW | CS_OWNDC);  //TODO(casey): "Will have check later whether CS_HREDRAW, CS_VREDRAW, CS_OWNDC still matters nowadays." --> ANS: They doesn't matter.
-	/*
-	 *
-	 * CS_CLASSDC -> casey@ "It says I want my own device-context for any window thats created with the this window class. @docs "Allocates one device context to be shared by all windows in the class"
-	 * CS_OWNDC   -> casey@ "I want my own Dc for every individual window. This is techinically the one that we will be using. It probably not necessary these days to put this put still I'm putting it for old time sake. What that basically means is that we will not have to get and release DCs for our windows if we don't want to , becoz we will always have our own DC that we can just use. Although CS_CLASSDC would have also done the same thing since we are going to create only one window." 
-	 *
-	 * */
-
+	WNDCLASSA WindowClass 		= {};
+	WindowClass.hInstance 		= Instance;
+	WindowClass.lpfnWndProc 	= Win32_MainWindowCallback; 
+	WindowClass.lpszClassName 	= "HandmadeHeroWindowClass";
+	WindowClass.style 			= (CS_HREDRAW | CS_VREDRAW | CS_OWNDC);  
 
 	if (RegisterClassA(&WindowClass)) 
 	{
-		HWND WindowHandle = CreateWindowExA(0, //DWORD dwExStyle, 
-						    WindowClass.lpszClassName, //LPCSTR lpClassName, 
-						    "Handmade Hero", //LPCSTR lpWindowName, 
-						    (WS_OVERLAPPEDWINDOW | WS_VISIBLE), //DWORD dwStyle, 
-						    CW_USEDEFAULT, //int X, 
-						    CW_USEDEFAULT, //int Y, 
-						    CW_USEDEFAULT, //int nWidth, 
-						    CW_USEDEFAULT, //int nHeight, 
-						    0, //HWND hWndParent, 
-						    0, //HMENU hMenu, 
-						    Instance, //HINSTANCE hInstance, 
-						    0);//LPVOID lpParam
+		HWND WindowHandle = CreateWindowExA(0, 
+						    				WindowClass.lpszClassName, 
+						    				"Handmade Hero", 		   
+						    				(WS_OVERLAPPEDWINDOW | WS_VISIBLE), 
+						    				CW_USEDEFAULT, 
+						    				CW_USEDEFAULT, 
+						    				CW_USEDEFAULT,
+						    				CW_USEDEFAULT,
+						    				0, 
+						    				0,
+						    				Instance, 
+						    				0);
 
-		if (WindowHandle != NULL) //@casey: Do not write != NULL. Since NULL === 0. But I like it.
+		if (WindowHandle != NULL) 
 		{
-			for(;;) //@casey: "If we don'twrite the infinite-loop, then The program will start and instantly close. We basically need to sit in an infinite loop processing messages until windows actually tells us that we are done." "We are using for(;;) as our infinite loop, rather than while(1) or while(true) becoz the if we set the compiler flag to show us all warnings(/Wall) then it will show us few-warnings since 1 and true will never change inside while loop condition.
+			Running = true;
+			while (Running)
 			{
 				MSG Message;
-				BOOL MessageResult = GetMessageA(&Message,//LPMSG lpMsg :-> receives message information from the thread's message queue
-								 0, //HWND hWnd :->If hWnd is NULL, GetMessage retrieves messages for any window that belongs to the current thread, and any messages on the current thread's message queue whose hwnd value is NULL (see the MSG structure). Therefore if hWnd is NULL, both window messages and thread messages are processed.  
-								 0,  //UINT wMsgFilterMin
-								 0); //UINT wMsgFilterMax // ["If wMsgFilterMin and wMsgFilterMax are both zero, GetMessage returns all available messages"]
-
+				BOOL MessageResult = GetMessageA(&Message,
+								 				 0, 
+								 				 0,  
+								 				 0);
 				if (MessageResult > 0)
 				{
 					TranslateMessage(&Message);
-					DispatchMessageA(&Message); //Each time the program calls the DispatchMessage function, it indirectly causes Windows to invoke the WindowProc function, once for each message.
+					DispatchMessageA(&Message); 
 				} 
 				else 
 				{
 					break;
 				}
-				
 			}
-
-
 		}
 		else 
 		{
 			//@casey(TODO): Logging
 		}
-		
-
 	}
-	else //When Registering Fails. @casey"Generally it never happens in practise" 
+	else 
 	{
 		//@casey(TODO): Logging
 	}
 
-	
-
 	return 0;
 }
-
-//////////////////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////////////////
-
-// (2) Tutorial: (https://docs.microsoft.com/en-us/windows/win32/learnwin32/your-first-windows-program)
 
