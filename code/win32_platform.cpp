@@ -1,8 +1,9 @@
-// Day6: Gamepad And Keyboard Input
+// Day7: Initializing DirectSound 
 
 #include <Windows.h>
 #include <stdint.h>
 #include <Xinput.h>
+#include <dsound.h>
 
 #define internal_func	static
 #define global_variable static
@@ -13,6 +14,8 @@ typedef int8_t int8;
 typedef int16_t int16;
 typedef int32_t int32;
 typedef int64_t int64;
+
+typedef int32 bool32;
 //unsigned
 typedef uint8_t uint8;
 typedef uint16_t uint16;
@@ -44,17 +47,17 @@ struct Win32_WindowDimensions
 
 //XInputGetState and XInputSetState settings
 //**************************************************************************************************
-//**************************************************************************************************
 
 /*
  * XInputGetState stuff
  */
-#define  X_INPUT_GET_STATE(func_name) \
-	DWORD WINAPI func_name(DWORD dwUserIndex, XINPUT_STATE* pVibration)
+#define  X_INPUT_GET_STATE(func_name)				\
+	DWORD WINAPI func_name(DWORD dwUserIndex,		\
+						   XINPUT_STATE* pVibration)
 typedef X_INPUT_GET_STATE(x_input_get_state); 
 X_INPUT_GET_STATE(XInputGetStateStub) 
 {
-	return 0;
+	return ERROR_DEVICE_NOT_CONNECTED;
 }
 global_variable x_input_get_state *XInputGetState_ = XInputGetStateStub; 
 #define XInputGetState XInputGetState_
@@ -62,12 +65,14 @@ global_variable x_input_get_state *XInputGetState_ = XInputGetStateStub;
 /*
  * XInputSetState stuff
  */
-#define	 X_INPUT_SET_STATE(func_name) \
-	DWORD WINAPI func_name(DWORD dwUserIndex, XINPUT_VIBRATION* pVibration)
+
+#define	 X_INPUT_SET_STATE(func_name)					\
+	DWORD WINAPI func_name(DWORD dwUserIndex,			\
+						   XINPUT_VIBRATION* pVibration)
 typedef X_INPUT_SET_STATE(x_input_set_state);
 X_INPUT_SET_STATE(XInputSetStateStub)
 {
-	return 0;
+	return ERROR_DEVICE_NOT_CONNECTED;
 }
 global_variable x_input_set_state *XInputSetState_ = XInputSetStateStub;
 #define XInputSetState XInputSetState_
@@ -76,11 +81,126 @@ global_variable x_input_set_state *XInputSetState_ = XInputSetStateStub;
 internal_func
 void Win32_LoadXInput()
 {
-	HMODULE XInputLibaray = LoadLibraryA("xinput1_4.dll");
-	if(XInputLibaray)
+	HMODULE XInputLibrary = LoadLibraryA("xinput1_4.dll");
+	if (!XInputLibrary)
 	{
-		XInputGetState = (x_input_get_state *) GetProcAddress(XInputLibaray, "XInputGetState");
-		XInputSetState = (x_input_set_state *) GetProcAddress(XInputLibaray, "XInputSetState");
+		//TODO: @casey:-> Diagnostic
+		HMODULE XInputLibrary = LoadLibraryA("xinput1_3.dll"); //if xinput1_4.dll is not present in the Windows system of the user, then load xinput1_3.dll
+	}
+	if(XInputLibrary)
+	{
+		XInputGetState = (x_input_get_state *) GetProcAddress(XInputLibrary, "XInputGetState");
+		if (!XInputGetState) 
+		{
+			XInputGetState = XInputGetStateStub;
+		}
+		
+		XInputSetState = (x_input_set_state *) GetProcAddress(XInputLibrary, "XInputSetState");
+		if (!XInputSetState) 
+		{
+			XInputSetState = XInputSetStateStub;
+		}
+
+		//TODO: @casey:-> Diagnostic
+	}
+	else 
+	{
+		//TODO: @casey:-> Diagnostic
+	}
+}
+
+//**************************************************************************************************
+
+
+/*
+ * DirectSound Stuff
+ * */
+
+#define  DIRECT_SOUND_CREATE(func_name)				\
+	HRESULT WINAPI func_name(LPCGUID pcGuidDevice,  \
+							 LPDIRECTSOUND *ppDS,   \
+							 LPUNKNOWN pUnkOuter)
+typedef DIRECT_SOUND_CREATE(direct_sound_create);
+
+internal_func
+void Win32_InitDSound(HWND Window, 
+					  int32 SamplesPerSecond,
+					  int32 BufferSize)
+{
+	//(1st): Load the library
+	HMODULE DSoundLibaray = LoadLibraryA("dsound.dll");
+	if (DSoundLibaray)
+	{
+		//(2nd): Get a DirectSound object! (cooperative mode)  b/c DirectSound is based on OOP
+		direct_sound_create *DirectSoundCreate = (direct_sound_create *) GetProcAddress(DSoundLibaray, "DirectSoundCreate");
+		LPDIRECTSOUND DirectSound;
+		if (DirectSoundCreate && SUCCEEDED(DirectSoundCreate(NULL,         //assumming we get the DirectSoundCreate() address, we are going to run it in here 
+															 &DirectSound,
+															 NULL)))
+		{
+			WAVEFORMATEX WaveFormat                     =   {};
+						 WaveFormat.wFormatTag          =   WAVE_FORMAT_PCM;
+						 WaveFormat.nChannels           =   2;
+						 WaveFormat.nSamplesPerSec      =   SamplesPerSecond;
+						 WaveFormat.wBitsPerSample      =   16;
+						 WaveFormat.nBlockAlign         =   (WaveFormat.nChannels * WaveFormat.wBitsPerSample)/8;
+						 WaveFormat.nAvgBytesPerSec     =   (WaveFormat.nSamplesPerSec * WaveFormat.nBlockAlign);
+						 WaveFormat.cbSize              =   0;
+			
+			if (SUCCEEDED(DirectSound->SetCooperativeLevel(Window, DSSCL_PRIORITY)))
+			{
+				DSBUFFERDESC BufferDescription = {};
+				BufferDescription.dwSize = sizeof(BufferDescription);
+				BufferDescription.dwFlags =	DSBCAPS_PRIMARYBUFFER; //TODO: @casey-> DSBCAPS_GLOBALFOCUS
+				
+				//(3rd): Create a primary buffer, where we will basically set the mode of that in the old school way of doing things
+				LPDIRECTSOUNDBUFFER PrimaryBuffer;
+
+				if (SUCCEEDED(DirectSound->CreateSoundBuffer(&BufferDescription, 
+														 	 &PrimaryBuffer, 
+															 NULL)))
+				{
+					if (SUCCEEDED(PrimaryBuffer->SetFormat(&WaveFormat)))
+					{
+						//Now, we have finally set the format	
+
+						OutputDebugStringA("PrimaryBuffer format was set\n"); //Test
+					}
+					else 
+					{
+						//TODO: @casey-> Diagnostic
+					}
+				}
+			}
+			else 
+			{
+				//TODO: @casey-> Diagnostic
+			}
+			
+			//(4th): Create a secondary buffer, where we are basically going to write into	
+			
+			DSBUFFERDESC BufferDescription                 =  {};
+						 BufferDescription.dwSize          =  sizeof(BufferDescription);
+						 BufferDescription.dwFlags         =  0;
+						 BufferDescription.dwBufferBytes   =  BufferSize;
+						 BufferDescription.lpwfxFormat     =  &WaveFormat;
+			
+			LPDIRECTSOUNDBUFFER SecondaryBuffer;
+			
+			if (SUCCEEDED(DirectSound->CreateSoundBuffer(&BufferDescription, 
+														 &SecondaryBuffer, 
+														 NULL)))
+			{
+				//(5th): Start it playing!
+
+				OutputDebugStringA("SecondaryBuffer created successfully.\n"); //Test
+			}
+			
+		}
+		else 
+		{
+			//TODO: @casey:-> Diagnostic
+		}
 	}
 }
 
@@ -106,7 +226,6 @@ void RenderWeirdGradient(Win32_OffScreenBuffer *Buffer,
 						 int XOffset, 
 						 int YOffset)
 {
-	//TODO: Let's see what the optimizer does	
 	uint8* Row   =  (uint8*) Buffer->Memory;
 
 	for(int Y = 0; 
@@ -130,7 +249,7 @@ void RenderWeirdGradient(Win32_OffScreenBuffer *Buffer,
 			*Pixel++          =  (Red << 16) | (Green << 8) | (Blue); 
 		}
 
-		Row += Buffer->Pitch; // I setted "Buffer.Pitch" value in Win32_ResizeDIBSection(), where I was setting up all the important parameters releated to the bitmap.
+		Row += Buffer->Pitch; 
 	}
 }
 
@@ -161,7 +280,7 @@ void Win32_ResizeDIBSection(Win32_OffScreenBuffer *Buffer,
 
 	Buffer->Memory = VirtualAlloc(0, 
 								  BitmapMemorySize, 
-								  MEM_COMMIT, 
+								  MEM_RESERVE | MEM_COMMIT, 
 								  PAGE_READWRITE);
 	
 	Buffer->Pitch = (Buffer->Width) * (BytesPerPixel);
@@ -267,6 +386,12 @@ LRESULT Win32_MainWindowCallback(HWND Window,
 					OutputDebugStringA("\n");
 				}
 			}
+			
+			bool32 AltKeyWasDown = (LParam & (1 << 29)); //((LParam & (1 << 29)) != 0);
+			if ((VKcode == VK_F4) && AltKeyWasDown)
+			{
+				GlobalRunning = false;
+			}
 		} 
 		break;
 
@@ -300,14 +425,13 @@ int CALLBACK WinMain(HINSTANCE Instance,
 					 LPSTR CmdLine,
 					 int ShowCmd)
 {
-	Win32_LoadXInput();
+	Win32_LoadXInput(); //@casey:-> "Unlike DirectSound, we can load xinput anytime and anywhere we want."
 
 	WNDCLASSA WindowClass = {};
 
 	Win32_ResizeDIBSection(&GlobalBackBuffer,
 						   1280,
 						   720);
-						   
 
 	WindowClass.lpszClassName   =  "HandmadeHeroWindowClass";
 	WindowClass.hInstance       =  Instance;
@@ -330,9 +454,13 @@ int CALLBACK WinMain(HINSTANCE Instance,
 									  0);
 		if (Window)
 		{
+			//Initializing - DirectSound
+			Win32_InitDSound(Window,					//@casey:-> "I think we cannot get our directSound untill and we have our Window set" 
+							 48000,
+							 48000 * sizeof(int16) * 2); 
+
 			int XOffset = 0;
 			int YOffset = 0;
-			
 			GlobalRunning = true;
 			while (GlobalRunning)
 			{
@@ -390,7 +518,6 @@ int CALLBACK WinMain(HINSTANCE Instance,
 						{
 							//(YOffset) += 5;
 						}
-
 					}
 					else 
 					{
